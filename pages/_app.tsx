@@ -3,7 +3,7 @@ import '@rainbow-me/rainbowkit/styles.css'
 import { getDefaultConfig, RainbowKitProvider } from '@rainbow-me/rainbowkit'
 import type { AppProps } from 'next/app'
 import { WagmiProvider } from 'wagmi'
-import { baseSepolia, sepolia } from 'wagmi/chains'
+import { berachain, mainnet } from 'wagmi/chains'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 const WALLET_CONNECT_PROJECT_ID =
@@ -12,7 +12,7 @@ const WALLET_CONNECT_PROJECT_ID =
 const wagmiConfig = getDefaultConfig({
   appName: 'Relay Example',
   projectId: WALLET_CONNECT_PROJECT_ID,
-  chains: [baseSepolia, sepolia],
+  chains: [berachain, mainnet],
   ssr: true,
 })
 
