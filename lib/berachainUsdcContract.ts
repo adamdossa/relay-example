@@ -1388,4 +1388,4 @@ export const berachainUsdcContract = {
           "type": "function"
         }
       ]
-  }
+  } as const

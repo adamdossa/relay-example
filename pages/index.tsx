@@ -4,7 +4,6 @@ import type { NextPage } from 'next'
 import {
   convertViemChainToRelayChain,
   createClient,
-  Execute,
   MAINNET_RELAY_API,
 } from '@reservoir0x/relay-sdk'
 import {
@@ -16,10 +15,12 @@ import {
   useWatchBlocks,
 } from 'wagmi'
 import { berachain, mainnet } from 'viem/chains'
-import { Address, encodeAbiParameters, keccak256, createPublicClient, formatUnits, http } from 'viem'
-import { getBalance, readContract, switchChain } from 'wagmi/actions'
+import { Address, encodeFunctionData, createPublicClient, formatUnits, parseUnits, http } from 'viem'
+import { switchChain } from 'wagmi/actions'
 import { depositRelayerContract } from '../lib/depositRelayerContract'
 import { berachainUsdcContract } from '../lib/berachainUsdcContract'
+import { ethereumUsdcContract } from '../lib/ethereumUsdcContract'
+
 import { useQueryClient } from '@tanstack/react-query'
 import Image from 'next/image'
 import { getCurrentStepDescription } from '../lib/getCurrentStepDescription'
@@ -37,6 +38,32 @@ const publicClient = createPublicClient({
   chain: mainnet,
   transport: http(),
 })
+
+function getTransferCalldata(usdcAmount: string): string {
+  // Ensure the amount is in the right format (USDC has 6 decimals)
+  const amountInWei = parseUnits(usdcAmount, 6);
+  // Encode the approve function calldata
+  const calldata = encodeFunctionData({
+    abi: ethereumUsdcContract.abi, // ABI of the USDC contract
+    functionName: 'transfer',
+    args: [depositRelayerContract.address as Address, amountInWei],
+  })
+  console.log("TRANSFER: ", calldata);
+  return calldata
+}        
+
+function getDepositCalldata(user: Address, usdcAmount: string, originChainId: bigint, referrer: Address): string {
+  // Ensure the amount is in the right format (USDC has 6 decimals)
+  const amountInWei = parseUnits(usdcAmount, 6);
+  // Encode the approve function calldata
+  const calldata = encodeFunctionData({
+    abi: depositRelayerContract.abi,
+    functionName: 'handleRelayLinkDeposit',
+    args: [ethereumUsdcContract.address as Address, amountInWei, user, originChainId, referrer], // Assumes referrer is user themselves
+  })
+  console.log("DEPOSIT: ", calldata);
+  return calldata
+}
 
 const Home: NextPage = () => {
   const { address, chain: activeChain } = useAccount()
@@ -72,7 +99,7 @@ const Home: NextPage = () => {
       queryClient.invalidateQueries({ queryKey: berachainUsdcBalanceQueryKey })
     },
   })
-
+  //
   const deposit = useCallback(async () => {
     if (!wallet || !address) {
       console.error('Missing wallet')
@@ -87,32 +114,39 @@ const Home: NextPage = () => {
       }
       console.log(berachainUsdcBalance);
       setStep('Getting quote for deposit')
-      console.log((parseFloat(usdcAmount) * 1_000_000).toString())
+      
+      const transferCallData = getTransferCalldata(usdcAmount)
+      const depositCallData = getDepositCalldata(address, usdcAmount, BigInt(berachain.id), address)
+
       const quote = await relayClient.actions.getQuote({
         wallet,
         chainId: berachain.id, // The chain id to call from
         toChainId: mainnet.id, // The chain id to call to
-        amount: "1000000", //(parseFloat(usdcAmount) * 1_000_000).toString(), // Total value of txs
+        amount: parseUnits(usdcAmount, 6).toString(),
         currency: berachainUsdcContract.address,
-        toCurrency: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', // USDC on Ethereum
-        // currency: '0x0000000000000000000000000000000000000000', // Native Gas Address
-        // toCurrency: '0x0000000000000000000000000000000000000000', // Native Gas Address
+        toCurrency: ethereumUsdcContract.address,
         tradeType: 'EXACT_OUTPUT',
-        txs: [{
-          to: depositRelayerContract.address,
-          value:  "1000000", //(parseFloat(usdcAmount) * 1_000_000).toString(),
-          // Correctly formatted call data - requires 1000000 USDC to have been transferred to depositRelayerContract before execution
-          data: "0x41243d82000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb4800000000000000000000000000000000000000000000000000000000000f424000000000000000000000000089ab9dc912526c573d630d6342f46d0522d9bbd600000000000000000000000000000000000000000000000000000000000138de0000000000000000000000006d02b20698652060bab15e9f9283de60dca25112"
-        }]
+        txs: [
+          {
+            to: ethereumUsdcContract.address,
+            value:  "0",
+            data: transferCallData
+          },
+          {
+            to: depositRelayerContract.address,
+            value:  "0",
+            data: depositCallData
+          }
+        ]
       });
       console.log(quote);
-      // await relayClient.actions.execute({
-      //   quote,
-      //   wallet,
-      //   // onProgress: (steps, currentStep, currentStepItem, fees, details, txHashes) => {
-      //   //   console.log(steps, currentStep, currentStepItem, fees, details, txHashes)
-      //   // }
-      // })
+      await relayClient.actions.execute({
+        quote,
+        wallet,
+        // onProgress: (steps, currentStep, currentStepItem, fees, details, txHashes) => {
+        //   console.log(steps, currentStep, currentStepItem, fees, details, txHashes)
+        // }
+      })
     } catch (e) {
       throw e
     }
